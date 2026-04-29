@@ -12,6 +12,8 @@
         <file>icons/new.png</file>
         <file>icons/open.png</file>
         <file>icons/save.png</file>
-        <file>icons/monastery.png</file>
+        <file>icons/shoin.png</file>
+        <file>icons/strikethru.png</file>
+        <file>icons/checklist.png</file>
     </qresource>
 </RCC>

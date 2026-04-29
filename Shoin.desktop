@@ -1,9 +1,9 @@
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=Monastery
+Name=Shoin
 Comment=Classic word processor with parchment aesthetic
-Exec=Monastery
-Icon=monastery
+Exec=Shoin
+Icon=shoin
 Categories=Office;WordProcessor;TextEditor;
 Terminal=false

@@ -1,5 +1,5 @@
 #include "MonasteryEditor.h"
-#include "MonasteryFrame.h"
+#include "ShoinFrame.h"
 #include <QLabel>
 #include <QTextEdit>
 #include <QVBoxLayout>
@@ -105,7 +105,7 @@ MonasteryEditor::MonasteryEditor(QWidget *parent) : QWidget(parent) {
     }
     m_textEdit->setFont(QFont(fontFamily, 12));
 
-    m_userDicPath = MonasteryFrame::getRealAppDir() + "/user.dic";
+    m_userDicPath = ShoinFrame::getRealAppDir() + "/user.dic";
     m_highlighter = new HunspellHighlighter(m_textEdit->document(), m_userDicPath);
 
     m_textEdit->setContextMenuPolicy(Qt::CustomContextMenu);

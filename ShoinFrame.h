@@ -1,20 +1,34 @@
-#ifndef MONASTERYFRAME_H
-#define MONASTERYFRAME_H
+#ifndef SHOINFRAME_H
+#define SHOINFRAME_H
 
 #include <QWidget>
 #include <QTimer>
 #include <QMouseEvent>
 #include <QResizeEvent>
 #include <QLabel>
+#include <QSplitter>
+#include <QTreeView>
+#include <QFileSystemModel>
+#include <QFileIconProvider>
+
+extern const char *folder_xpm[];
+
+class SimpleIconProvider : public QFileIconProvider {
+public:
+    QIcon icon(const QFileInfo &info) const override {
+        if (info.isDir()) return QIcon(QPixmap(folder_xpm));
+        return QIcon::fromTheme("text-x-generic", QIcon(":/icons/file.png"));
+    }
+};
 
 class MonasteryEditor;
 
-class MonasteryFrame : public QWidget {
+class ShoinFrame : public QWidget {
     Q_OBJECT
 
 public:
-    MonasteryFrame(QWidget *parent = nullptr);
-    ~MonasteryFrame();
+    ShoinFrame(QWidget *parent = nullptr);
+    ~ShoinFrame();
     static QString getRealAppDir();
 
 protected:
@@ -27,8 +41,6 @@ protected:
     bool eventFilter(QObject *obj, QEvent *event) override;
 
 private slots:
-    void onNew();
-    void onOpen();
     void onSave();
     void onSaveAs();
     void onExit();
@@ -36,6 +48,7 @@ private slots:
     void onBold();
     void onItalic();
     void onUnderline();
+    void onStrikethrough();
     void onAlignLeft();
     void onAlignCenter();
     void onAlignRight();
@@ -47,6 +60,14 @@ private slots:
     void onPrint();
     void onInsertPageBreak();
     void updateWordCount();
+    void onNewFolder();
+    void onNewEntry();
+    void onTreeDoubleClicked(const QModelIndex &index);
+    void onTreeSelectionChanged(const QItemSelection &selected, const QItemSelection &deselected);
+    void onTreeContextMenu(const QPoint &pos);
+    void onTreeClicked(const QModelIndex &index);
+    void onLeatherTheme();
+    void onClassicBlueTheme();
 
 private:
     void createActions();
@@ -54,6 +75,7 @@ private:
     void createToolBar();
     void createStatusBar();
     void createDocsFolder();
+    void saveCurrentIfModified();
     QIcon createToolbarIcon(const QString &symbol);
 
     MonasteryEditor *m_editor;
@@ -71,8 +93,6 @@ private:
     ResizeDirection m_resizeDirection;
 
     // Actions
-    QAction *m_newAction;
-    QAction *m_openAction;
     QAction *m_saveAction;
     QAction *m_saveAsAction;
     QAction *m_printAction;
@@ -80,6 +100,7 @@ private:
     QAction *m_boldAction;
     QAction *m_italicAction;
     QAction *m_underlineAction;
+    QAction *m_strikethroughAction;
     QAction *m_alignLeftAction;
     QAction *m_alignCenterAction;
     QAction *m_alignRightAction;
@@ -93,6 +114,16 @@ private:
     QAction *m_copyAction;
     QAction *m_pasteAction;
     QLabel *m_wordCountLabel;
+    QLineEdit *m_titleEdit;
+
+    // Library pane
+    QSplitter *m_splitter;
+    QTreeView *m_treeView;
+    QFileSystemModel *m_fileModel;
+
+    // Themes
+    QAction *m_leatherThemeAction;
+    QAction *m_classicBlueThemeAction;
 };
 
-#endif // MONASTERYFRAME_H
+#endif // SHOINFRAME_H

@@ -1,4 +1,4 @@
-#include "MonasteryFrame.h"
+#include "ShoinFrame.h"
 #include "MonasteryEditor.h"
 #include <QApplication>
 #include <algorithm>
@@ -28,8 +28,17 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QVBoxLayout>
+#include <QLineEdit>
 #include <QFileInfo>
 #include <QPainter>
+#include <QSplitter>
+#include <QTreeView>
+#include <QFileSystemModel>
+#include <QModelIndex>
+#include <QItemSelectionModel>
+#include <QContextMenuEvent>
+#include <QDateTime>
+#include <QInputDialog>
 
 // Member variables
 QWidget *m_titleBar;
@@ -58,6 +67,17 @@ QAction *m_numberAction;
 QAction *m_undoAction;
 QAction *m_redoAction;
 QAction *m_pageBreakAction;
+
+// Library pane
+QSplitter *m_splitter;
+QTreeView *m_treeView;
+QFileSystemModel *m_fileModel;
+QAction *m_newFolderAction;
+QAction *m_newEntryAction;
+
+// Themes
+QAction *m_leatherThemeAction;
+QAction *m_classicBlueThemeAction;
 
 // Embedded XPM icons for classic Word 6.0 look
 static const char *bold_xpm[] = {
@@ -275,7 +295,30 @@ static const char *number_xpm[] = {
 nullptr
 };
 
-MonasteryFrame::MonasteryFrame(QWidget *parent) : QWidget(parent) {
+const char *folder_xpm[] = {
+"16 16 3 1",
+"  c None",
+". c #3C2F2F",
+"F c #D4AF37",
+"................",
+"................",
+"................",
+".FFFFFFFFFFFF...",
+".F............F.",
+".F............F.",
+".F............F.",
+".F............F.",
+".F............F.",
+".F............F.",
+".F............F.",
+".F............F.",
+".FFFFFFFFFFFF...",
+"................",
+"................",
+"................",nullptr
+};
+
+ShoinFrame::ShoinFrame(QWidget *parent) : QWidget(parent) {
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
     setMouseTracking(true);  // Enable mouse tracking for cursor changes
     setStyleSheet("QWidget { background-color: #3C2F2F; }");  // Match title bar color for borders
@@ -322,7 +365,7 @@ MonasteryFrame::MonasteryFrame(QWidget *parent) : QWidget(parent) {
     closeBtn->setStyleSheet("border: none; background: transparent; color: white;");
     connect(closeBtn, &QPushButton::clicked, this, &QWidget::close);
 
-    QLabel *titleLabel = new QLabel("Monastery");
+    QLabel *titleLabel = new QLabel("Shoin — 書院");
     QFont titleFont("Noto Serif", 10, QFont::Bold);
     titleLabel->setFont(titleFont);
     titleLabel->setStyleSheet("color: #D4AF37;");   // gold contrast like Aureus
@@ -367,6 +410,9 @@ MonasteryFrame::MonasteryFrame(QWidget *parent) : QWidget(parent) {
     editMenu->addAction(m_pasteAction);
     editMenu->addSeparator();
     editMenu->addAction(m_pageBreakAction);
+    QMenu *themeMenu = m_menuBar->addMenu("&Theme");
+    themeMenu->addAction(m_leatherThemeAction);
+    themeMenu->addAction(m_classicBlueThemeAction);
     mainLayout->addWidget(m_menuBar);
 
     // toolBar - leather theme with readable elements
@@ -394,6 +440,7 @@ MonasteryFrame::MonasteryFrame(QWidget *parent) : QWidget(parent) {
     m_boldAction->setIcon(QIcon(":/icons/bold.png"));
     m_italicAction->setIcon(QIcon(":/icons/italic.png"));
     m_underlineAction->setIcon(QIcon(":/icons/underline.png"));
+    m_strikethroughAction->setIcon(QIcon(":/icons/strikethru.png"));
     m_alignLeftAction->setIcon(QIcon(":/icons/alignleft.png"));
     m_alignCenterAction->setIcon(QIcon(":/icons/aligncenter.png"));
     m_alignRightAction->setIcon(QIcon(":/icons/alignright.png"));
@@ -406,17 +453,18 @@ MonasteryFrame::MonasteryFrame(QWidget *parent) : QWidget(parent) {
     m_toolBar->addSeparator();
     QFontComboBox *fontCombo = new QFontComboBox();
     fontCombo->setCurrentFont(QFont("Noto Serif"));
-    connect(fontCombo, QOverload<const QString &>::of(&QFontComboBox::currentTextChanged), this, &MonasteryFrame::onFontChanged);
+    connect(fontCombo, QOverload<const QString &>::of(&QFontComboBox::currentTextChanged), this, &ShoinFrame::onFontChanged);
     m_toolBar->addWidget(fontCombo);
     QComboBox *sizeCombo = new QComboBox();
     sizeCombo->addItems({"8", "10", "12", "14", "16", "18", "20", "24", "28", "32"});
     sizeCombo->setCurrentText("12");
-    connect(sizeCombo, QOverload<const QString &>::of(&QComboBox::currentTextChanged), this, &MonasteryFrame::onSizeChanged);
+    connect(sizeCombo, QOverload<const QString &>::of(&QComboBox::currentTextChanged), this, &ShoinFrame::onSizeChanged);
     m_toolBar->addWidget(sizeCombo);
     m_toolBar->addSeparator();
     m_toolBar->addAction(m_boldAction);
     m_toolBar->addAction(m_italicAction);
     m_toolBar->addAction(m_underlineAction);
+    m_toolBar->addAction(m_strikethroughAction);
     m_toolBar->addSeparator();
     m_toolBar->addAction(m_alignLeftAction);
     m_toolBar->addAction(m_alignCenterAction);
@@ -427,9 +475,75 @@ MonasteryFrame::MonasteryFrame(QWidget *parent) : QWidget(parent) {
     m_toolBar->addAction(m_numberAction);
     mainLayout->addWidget(m_toolBar);
 
-    // editor
+    // splitter with tree view and editor
+    m_splitter = new QSplitter(Qt::Horizontal, this);
+    m_splitter->setStretchFactor(0, 0);
+    m_splitter->setStretchFactor(1, 1);
+
+    // tree view
+    m_fileModel = new QFileSystemModel(this);
+    m_fileModel->setReadOnly(false);
+    m_fileModel->setRootPath(m_docsDir);
+    m_fileModel->setNameFilters(QStringList() << "*.html");
+    m_fileModel->setNameFilterDisables(false); // hide non-matching files
+    m_fileModel->setIconProvider(new SimpleIconProvider());
+
+    m_treeView = new QTreeView(this);
+    m_treeView->setAnimated(true);
+    m_treeView->setItemsExpandable(true);
+    m_treeView->setExpandsOnDoubleClick(false);
+    m_treeView->setRootIsDecorated(true);
+    connect(m_treeView, &QTreeView::clicked, this, &ShoinFrame::onTreeClicked);
+    m_treeView->setModel(m_fileModel);
+    m_treeView->setRootIndex(m_fileModel->index(m_docsDir));
+    m_treeView->setColumnHidden(1, true); // hide size
+    m_treeView->setColumnHidden(2, true); // hide type
+    m_treeView->setColumnHidden(3, true); // hide date
+    m_treeView->setHeaderHidden(true);
+    m_treeView->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_treeView, &QTreeView::doubleClicked, this, &ShoinFrame::onTreeDoubleClicked);
+    connect(m_treeView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &ShoinFrame::onTreeSelectionChanged);
+    connect(m_treeView, &QTreeView::customContextMenuRequested, this, &ShoinFrame::onTreeContextMenu);
+
+    m_splitter->addWidget(m_treeView);
+
+    m_treeView->setDragEnabled(true);
+    m_treeView->setAcceptDrops(true);
+    m_treeView->setDropIndicatorShown(true);
+    m_treeView->setDragDropMode(QAbstractItemView::InternalMove);
+    m_treeView->setSelectionMode(QAbstractItemView::SingleSelection);
+
+    // editor container with title bar
+    QWidget *editorContainer = new QWidget(this);
+    QVBoxLayout *editorLayout = new QVBoxLayout(editorContainer);
+    editorLayout->setContentsMargins(0,0,0,0);
+    editorLayout->setSpacing(0);
+
+    m_titleEdit = new QLineEdit(this);
+    m_titleEdit->setPlaceholderText("Select a file to rename");
+    m_titleEdit->setEnabled(false);
+    connect(m_titleEdit, &QLineEdit::returnPressed, this, [this]() {
+        if (m_currentFilePath.isEmpty()) return;
+        QString newName = m_titleEdit->text().trimmed();
+        if (newName.isEmpty()) return;
+        newName += ".html";
+        QFileInfo oldInfo(m_currentFilePath);
+        QString newPath = oldInfo.absoluteDir().absoluteFilePath(newName);
+        if (QFile::rename(m_currentFilePath, newPath)) {
+            m_currentFilePath = newPath;
+            m_statusBar->showMessage("File renamed to: " + newName);
+        } else {
+            QMessageBox::warning(this, "Error", "Could not rename file.");
+        }
+    });
+    editorLayout->addWidget(m_titleEdit);
+
     m_editor = new MonasteryEditor(this);
-    mainLayout->addWidget(m_editor, 1);
+    editorLayout->addWidget(m_editor);
+
+    m_splitter->addWidget(editorContainer);
+
+    mainLayout->addWidget(m_splitter, 1);
 
     // statusBar - dark leather + permanent word count
     m_statusBar = new QStatusBar;
@@ -455,16 +569,16 @@ MonasteryFrame::MonasteryFrame(QWidget *parent) : QWidget(parent) {
                         "QMenu { background-color: #6F5A4A; color: #D4AF37; border: 1px solid #3C2F2F; }"
                         "QMenu::item:selected { background-color: #8B6F5A; color: #D4AF37; }");
 
-    setWindowIcon(QIcon(":/icons/monastery.png"));
+    setWindowIcon(QIcon(":/icons/shoin.png"));
 
     setMinimumSize(680, 460);  // lets us shrink freely while keeping UI usable
     m_normalGeometry = geometry();
 
     m_autoSaveTimer = new QTimer(this);
-    connect(m_autoSaveTimer, &QTimer::timeout, this, &MonasteryFrame::onAutoSave);
+    connect(m_autoSaveTimer, &QTimer::timeout, this, &ShoinFrame::onAutoSave);
     m_autoSaveTimer->start(30000);  // 30 seconds
 
-    connect(m_editor->textEdit(), &QTextEdit::textChanged, this, &MonasteryFrame::updateWordCount);
+    connect(m_editor->textEdit(), &QTextEdit::textChanged, this, &ShoinFrame::updateWordCount);
     connect(m_undoAction, &QAction::triggered, m_editor->textEdit(), &QTextEdit::undo);
     connect(m_redoAction, &QAction::triggered, m_editor->textEdit(), &QTextEdit::redo);
     connect(m_cutAction, &QAction::triggered, m_editor->textEdit(), &QTextEdit::cut);
@@ -479,14 +593,15 @@ MonasteryFrame::MonasteryFrame(QWidget *parent) : QWidget(parent) {
     m_statusBar->installEventFilter(this);
 
     m_statusBar->showMessage("Ready");
+    onLeatherTheme();
     updateWordCount();
 }
 
-MonasteryFrame::~MonasteryFrame() {
+ShoinFrame::~ShoinFrame() {
     // Qt handles cleanup
 }
 
-QString MonasteryFrame::getRealAppDir() {
+QString ShoinFrame::getRealAppDir() {
     QByteArray appImage = qgetenv("APPIMAGE");
     if (!appImage.isEmpty()) {
         return QFileInfo(QString::fromUtf8(appImage)).absolutePath();
@@ -495,91 +610,111 @@ QString MonasteryFrame::getRealAppDir() {
     }
 }
 
-void MonasteryFrame::createDocsFolder() {
+void ShoinFrame::createDocsFolder() {
     m_docsDir = getRealAppDir() + "/Docs";
     QDir().mkpath(m_docsDir);
 }
 
-void MonasteryFrame::createActions() {
+void ShoinFrame::saveCurrentIfModified() {
+    if (!m_currentFilePath.isEmpty() && m_editor->textEdit()->document()->isModified()) {
+        QFile file(m_currentFilePath);
+        if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            QTextStream out(&file);
+            out << m_editor->textEdit()->toHtml();
+            m_editor->textEdit()->document()->setModified(false);
+            m_statusBar->showMessage("Auto-saved: " + QFileInfo(m_currentFilePath).fileName());
+        }
+    }
+}
+
+void ShoinFrame::createActions() {
     m_newAction = new QAction("&New", this);
     m_newAction->setIcon(QIcon(":/icons/new.png"));
     m_newAction->setShortcut(QKeySequence::New);
-    connect(m_newAction, &QAction::triggered, this, &MonasteryFrame::onNew);
+    m_newAction->setToolTip("New Entry");
+    connect(m_newAction, &QAction::triggered, this, &ShoinFrame::onNewEntry);
 
     m_openAction = new QAction("&Open", this);
     m_openAction->setIcon(QIcon(":/icons/open.png"));
     m_openAction->setShortcut(QKeySequence::Open);
-    connect(m_openAction, &QAction::triggered, this, &MonasteryFrame::onOpen);
+    m_openAction->setToolTip("New Folder");
+    connect(m_openAction, &QAction::triggered, this, &ShoinFrame::onNewFolder);
 
     m_saveAction = new QAction("&Save", this);
     m_saveAction->setIcon(QIcon(":/icons/save.png"));
     m_saveAction->setShortcut(QKeySequence::Save);
-    connect(m_saveAction, &QAction::triggered, this, &MonasteryFrame::onSave);
+    connect(m_saveAction, &QAction::triggered, this, &ShoinFrame::onSave);
 
     m_saveAsAction = new QAction("Save &As...", this);
     m_saveAsAction->setIcon(QIcon::fromTheme("document-save-as"));
     m_saveAsAction->setShortcut(QKeySequence::SaveAs);
-    connect(m_saveAsAction, &QAction::triggered, this, &MonasteryFrame::onSaveAs);
+    connect(m_saveAsAction, &QAction::triggered, this, &ShoinFrame::onSaveAs);
 
     m_printAction = new QAction("&Print", this);
     m_printAction->setShortcut(QKeySequence::Print);
-    connect(m_printAction, &QAction::triggered, this, &MonasteryFrame::onPrint);
+    connect(m_printAction, &QAction::triggered, this, &ShoinFrame::onPrint);
 
     m_exitAction = new QAction("E&xit", this);
     m_exitAction->setShortcut(QKeySequence::Quit);
-    connect(m_exitAction, &QAction::triggered, this, &MonasteryFrame::onExit);
+    connect(m_exitAction, &QAction::triggered, this, &ShoinFrame::onExit);
 
     m_boldAction = new QAction(this);
     m_boldAction->setCheckable(true);
     m_boldAction->setToolTip("Bold");
     m_boldAction->setShortcut(QKeySequence("Ctrl+B"));
-    connect(m_boldAction, &QAction::triggered, this, &MonasteryFrame::onBold);
+    connect(m_boldAction, &QAction::triggered, this, &ShoinFrame::onBold);
 
     m_italicAction = new QAction(this);
     m_italicAction->setCheckable(true);
     m_italicAction->setToolTip("Italic");
     m_italicAction->setShortcut(QKeySequence("Ctrl+I"));
-    connect(m_italicAction, &QAction::triggered, this, &MonasteryFrame::onItalic);
+    connect(m_italicAction, &QAction::triggered, this, &ShoinFrame::onItalic);
 
     m_underlineAction = new QAction(this);
     m_underlineAction->setCheckable(true);
     m_underlineAction->setToolTip("Underline");
     m_underlineAction->setShortcut(QKeySequence("Ctrl+U"));
-    connect(m_underlineAction, &QAction::triggered, this, &MonasteryFrame::onUnderline);
+    connect(m_underlineAction, &QAction::triggered, this, &ShoinFrame::onUnderline);
+
+    m_strikethroughAction = new QAction(this);
+    m_strikethroughAction->setCheckable(true);
+    m_strikethroughAction->setToolTip("Strikethrough");
+    m_strikethroughAction->setShortcut(QKeySequence("Ctrl+Shift+S"));
+    connect(m_strikethroughAction, &QAction::triggered, this, &ShoinFrame::onStrikethrough);
 
     QActionGroup *alignGroup = new QActionGroup(this);
 
     m_alignLeftAction = new QAction(this);
     m_alignLeftAction->setCheckable(true);
     m_alignLeftAction->setToolTip("Align Left");
-    connect(m_alignLeftAction, &QAction::triggered, this, &MonasteryFrame::onAlignLeft);
+    connect(m_alignLeftAction, &QAction::triggered, this, &ShoinFrame::onAlignLeft);
     alignGroup->addAction(m_alignLeftAction);
 
     m_alignCenterAction = new QAction(this);
     m_alignCenterAction->setCheckable(true);
     m_alignCenterAction->setToolTip("Align Center");
-    connect(m_alignCenterAction, &QAction::triggered, this, &MonasteryFrame::onAlignCenter);
+    connect(m_alignCenterAction, &QAction::triggered, this, &ShoinFrame::onAlignCenter);
     alignGroup->addAction(m_alignCenterAction);
 
     m_alignRightAction = new QAction(this);
     m_alignRightAction->setCheckable(true);
     m_alignRightAction->setToolTip("Align Right");
-    connect(m_alignRightAction, &QAction::triggered, this, &MonasteryFrame::onAlignRight);
+    connect(m_alignRightAction, &QAction::triggered, this, &ShoinFrame::onAlignRight);
     alignGroup->addAction(m_alignRightAction);
 
     m_justifyAction = new QAction(this);
     m_justifyAction->setCheckable(true);
     m_justifyAction->setToolTip("Justify");
-    connect(m_justifyAction, &QAction::triggered, this, &MonasteryFrame::onJustify);
+    connect(m_justifyAction, &QAction::triggered, this, &ShoinFrame::onJustify);
     alignGroup->addAction(m_justifyAction);
 
     m_bulletAction = new QAction(this);
     m_bulletAction->setToolTip("Bulleted List");
-    connect(m_bulletAction, &QAction::triggered, this, &MonasteryFrame::onBulletList);
+    connect(m_bulletAction, &QAction::triggered, this, &ShoinFrame::onBulletList);
 
     m_numberAction = new QAction(this);
     m_numberAction->setToolTip("Numbered List");
-    connect(m_numberAction, &QAction::triggered, this, &MonasteryFrame::onNumberedList);
+    connect(m_numberAction, &QAction::triggered, this, &ShoinFrame::onNumberedList);
 
     m_undoAction = new QAction("Undo", this);
     m_undoAction->setShortcut(QKeySequence::Undo);
@@ -597,50 +732,38 @@ void MonasteryFrame::createActions() {
     m_pasteAction->setShortcut(QKeySequence::Paste);
 
     m_pageBreakAction = new QAction("Insert Page &Break", this);
-    connect(m_pageBreakAction, &QAction::triggered, this, &MonasteryFrame::onInsertPageBreak);
+    connect(m_pageBreakAction, &QAction::triggered, this, &ShoinFrame::onInsertPageBreak);
+
+    m_leatherThemeAction = new QAction("&Leather", this);
+    m_leatherThemeAction->setCheckable(true);
+    m_leatherThemeAction->setChecked(true);
+    connect(m_leatherThemeAction, &QAction::triggered, this, &ShoinFrame::onLeatherTheme);
+
+    m_classicBlueThemeAction = new QAction("&Classic Blue", this);
+    m_classicBlueThemeAction->setCheckable(true);
+    connect(m_classicBlueThemeAction, &QAction::triggered, this, &ShoinFrame::onClassicBlueTheme);
+
+    QActionGroup *themeGroup = new QActionGroup(this);
+    themeGroup->addAction(m_leatherThemeAction);
+    themeGroup->addAction(m_classicBlueThemeAction);
 }
 
-void MonasteryFrame::createMenus() {
+void ShoinFrame::createMenus() {
     // Menus are created in constructor
 }
 
-void MonasteryFrame::createToolBar() {
+void ShoinFrame::createToolBar() {
     // Toolbar is created in constructor
 }
 
-void MonasteryFrame::createStatusBar() {
+void ShoinFrame::createStatusBar() {
     // Status bar is created in constructor
 }
 
-void MonasteryFrame::onNew() {
-    if (m_editor->textEdit()->document()->isModified()) {
-        QMessageBox::StandardButton reply = QMessageBox::question(this, "Unsaved Changes",
-            "Document has unsaved changes. Save before creating new?", QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
-        if (reply == QMessageBox::Cancel) return;
-        if (reply == QMessageBox::Yes) onSave();
-    }
-    m_editor->textEdit()->clear();
-    m_editor->textEdit()->document()->setModified(false);
-    m_currentFilePath.clear();
-    m_statusBar->showMessage("New document created");
-}
 
-void MonasteryFrame::onOpen() {
-    QString fileName = QFileDialog::getOpenFileName(this, "Open HTML", m_docsDir, "HTML files (*.html)", nullptr, QFileDialog::DontUseNativeDialog);
-    if (fileName.isEmpty()) return;
 
-    QFile file(fileName);
-    if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        QString html = QString::fromUtf8(file.readAll());
-        m_editor->textEdit()->setHtml(html);
-        m_editor->textEdit()->document()->setModified(false);
-        m_currentFilePath = fileName;
-        m_statusBar->showMessage("File opened: " + fileName);
-    }
-}
-
-void MonasteryFrame::onSave() {
-    if (m_currentFilePath.isEmpty() || m_currentFilePath.contains("Monastery_AutoSave.html")) {
+void ShoinFrame::onSave() {
+    if (m_currentFilePath.isEmpty() || m_currentFilePath.contains("Shoin_AutoSave.html")) {
         QString fileName = QFileDialog::getSaveFileName(this, "Save HTML", m_docsDir, "HTML files (*.html)", nullptr, QFileDialog::DontUseNativeDialog);
         if (fileName.isEmpty()) return;
         if (!fileName.endsWith(".html")) fileName += ".html";
@@ -655,12 +778,12 @@ void MonasteryFrame::onSave() {
     }
 }
 
-void MonasteryFrame::onExit() {
+void ShoinFrame::onExit() {
     QApplication::quit();
 }
 
-void MonasteryFrame::onAutoSave() {
-    QString fileName = m_docsDir + "/Monastery_AutoSave.html";
+void ShoinFrame::onAutoSave() {
+    QString fileName = m_docsDir + "/Shoin_AutoSave.html";
     QFile file(fileName);
     if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
         QTextStream out(&file);
@@ -669,7 +792,7 @@ void MonasteryFrame::onAutoSave() {
     }
 }
 
-void MonasteryFrame::onPrint() {
+void ShoinFrame::onPrint() {
     QPrinter printer;
     QPrintDialog dialog(&printer, this);
     if (dialog.exec() == QDialog::Accepted) {
@@ -677,61 +800,67 @@ void MonasteryFrame::onPrint() {
     }
 }
 
-void MonasteryFrame::onInsertPageBreak() {
+void ShoinFrame::onInsertPageBreak() {
     QTextCursor cursor = m_editor->textEdit()->textCursor();
     cursor.insertHtml("<hr style=\"border: 1px dashed #666;\">");
     m_editor->textEdit()->setTextCursor(cursor);
 }
 
-void MonasteryFrame::onBold() {
+void ShoinFrame::onBold() {
     QTextCharFormat fmt;
     fmt.setFontWeight(m_boldAction->isChecked() ? QFont::Bold : QFont::Normal);
     m_editor->textEdit()->mergeCurrentCharFormat(fmt);
 }
 
-void MonasteryFrame::onItalic() {
+void ShoinFrame::onItalic() {
     QTextCharFormat fmt;
     fmt.setFontItalic(m_italicAction->isChecked());
     m_editor->textEdit()->mergeCurrentCharFormat(fmt);
 }
 
-void MonasteryFrame::onUnderline() {
+void ShoinFrame::onUnderline() {
     QTextCharFormat fmt;
     fmt.setFontUnderline(m_underlineAction->isChecked());
     m_editor->textEdit()->mergeCurrentCharFormat(fmt);
 }
 
-void MonasteryFrame::onAlignLeft() {
+void ShoinFrame::onStrikethrough() {
+    QTextCharFormat fmt;
+    fmt.setFontStrikeOut(m_strikethroughAction->isChecked());
+    m_editor->textEdit()->mergeCurrentCharFormat(fmt);
+}
+
+void ShoinFrame::onAlignLeft() {
     m_editor->textEdit()->setAlignment(Qt::AlignLeft);
 }
 
-void MonasteryFrame::onAlignCenter() {
+void ShoinFrame::onAlignCenter() {
     m_editor->textEdit()->setAlignment(Qt::AlignCenter);
 }
 
-void MonasteryFrame::onAlignRight() {
+void ShoinFrame::onAlignRight() {
     m_editor->textEdit()->setAlignment(Qt::AlignRight);
 }
 
-void MonasteryFrame::onJustify() {
+void ShoinFrame::onJustify() {
     m_editor->textEdit()->setAlignment(Qt::AlignJustify);
 }
 
-void MonasteryFrame::onBulletList() {
+void ShoinFrame::onBulletList() {
     m_editor->textEdit()->textCursor().insertList(QTextListFormat::ListDisc);
 }
 
-void MonasteryFrame::onNumberedList() {
+void ShoinFrame::onNumberedList() {
     m_editor->textEdit()->textCursor().insertList(QTextListFormat::ListDecimal);
 }
 
-void MonasteryFrame::onFontChanged(const QString &font) {
+void ShoinFrame::onFontChanged(const QString &font) {
     QFont currentFont = m_editor->textEdit()->currentFont();
     currentFont.setFamily(font);
     m_editor->textEdit()->setCurrentFont(currentFont);
 }
 
-void MonasteryFrame::onSizeChanged(const QString &size) {
+void ShoinFrame::onSizeChanged(const QString &size) {
     bool ok;
     int pointSize = size.toInt(&ok);
     if (ok) {
@@ -741,13 +870,13 @@ void MonasteryFrame::onSizeChanged(const QString &size) {
     }
 }
 
-void MonasteryFrame::updateWordCount() {
+void ShoinFrame::updateWordCount() {
     QString text = m_editor->textEdit()->toPlainText();
     QStringList words = text.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
     m_wordCountLabel->setText(QString("Words: %1").arg(words.count()));
 }
 
-void MonasteryFrame::closeEvent(QCloseEvent *event) {
+void ShoinFrame::closeEvent(QCloseEvent *event) {
     if (m_editor->textEdit()->document()->isModified()) {
         QMessageBox::StandardButton reply = QMessageBox::question(this, "Unsaved Changes",
             "Document has unsaved changes. Save before exiting?", QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
@@ -760,7 +889,7 @@ void MonasteryFrame::closeEvent(QCloseEvent *event) {
     event->accept();
 }
 
-void MonasteryFrame::mousePressEvent(QMouseEvent *event) {
+void ShoinFrame::mousePressEvent(QMouseEvent *event) {
     if (event->button() == Qt::LeftButton) {
         // Check for resize areas first (8-pixel border)
         const int border = 8;
@@ -806,7 +935,7 @@ void MonasteryFrame::mousePressEvent(QMouseEvent *event) {
     }
 }
 
-void MonasteryFrame::mouseMoveEvent(QMouseEvent *event) {
+void ShoinFrame::mouseMoveEvent(QMouseEvent *event) {
     if (m_dragging) {
         move(event->globalPosition().toPoint() - m_dragPosition);
         event->accept();
@@ -882,14 +1011,14 @@ void MonasteryFrame::mouseMoveEvent(QMouseEvent *event) {
     }
 }
 
-void MonasteryFrame::mouseReleaseEvent(QMouseEvent *event) {
+void ShoinFrame::mouseReleaseEvent(QMouseEvent *event) {
     m_dragging = false;
     m_resizing = false;
     m_resizeDirection = None;
     QWidget::mouseReleaseEvent(event);
 }
 
-void MonasteryFrame::mouseDoubleClickEvent(QMouseEvent *event) {
+void ShoinFrame::mouseDoubleClickEvent(QMouseEvent *event) {
     if (m_titleBar->geometry().contains(event->pos())) {
         if (isMaximized()) {
             showNormal();
@@ -903,12 +1032,12 @@ void MonasteryFrame::mouseDoubleClickEvent(QMouseEvent *event) {
     }
 }
 
-void MonasteryFrame::resizeEvent(QResizeEvent *event) {
+void ShoinFrame::resizeEvent(QResizeEvent *event) {
     m_titleBar->setFixedWidth(width());
     QWidget::resizeEvent(event);
 }
 
-bool MonasteryFrame::eventFilter(QObject *obj, QEvent *event) {
+bool ShoinFrame::eventFilter(QObject *obj, QEvent *event) {
     if (event->type() == QEvent::MouseMove) {
         QMouseEvent *mouseEvent = static_cast<QMouseEvent *>(event);
         // Update cursor based on global position relative to main window
@@ -940,7 +1069,7 @@ bool MonasteryFrame::eventFilter(QObject *obj, QEvent *event) {
     return QWidget::eventFilter(obj, event);
 }
 
-void MonasteryFrame::onSaveAs() {
+void ShoinFrame::onSaveAs() {
     QString fileName = QFileDialog::getSaveFileName(this, "Save HTML", m_docsDir, "HTML files (*.html)", nullptr, QFileDialog::DontUseNativeDialog);
     if (fileName.isEmpty()) return;
     if (!fileName.endsWith(".html")) fileName += ".html";
@@ -954,7 +1083,246 @@ void MonasteryFrame::onSaveAs() {
     }
 }
 
-QIcon MonasteryFrame::createToolbarIcon(const QString &symbol) {
+void ShoinFrame::onNewFolder() {
+    QModelIndex index = m_treeView->currentIndex();
+    QString path = m_fileModel->filePath(index);
+    if (path.isEmpty() || !QFileInfo(path).isDir()) {
+        path = m_docsDir;
+    }
+    QString folderName = QInputDialog::getText(this, "New Folder", "Folder name:");
+    if (folderName.isEmpty()) return;
+    QDir dir(path);
+    if (dir.mkdir(folderName)) {
+        m_statusBar->showMessage("Folder created: " + folderName);
+    } else {
+        QMessageBox::warning(this, "Error", "Could not create folder.");
+    }
+}
+
+void ShoinFrame::onNewEntry() {
+    QModelIndex index = m_treeView->currentIndex();
+    QString path = m_fileModel->filePath(index);
+    if (path.isEmpty() || !QFileInfo(path).isDir()) {
+        path = m_docsDir;
+    }
+    QString dateTime = QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm");
+    QString fileName = dateTime + ".html";
+    QString fullPath = QDir(path).absoluteFilePath(fileName);
+    QFile file(fullPath);
+    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QTextStream out(&file);
+        out << "<html><head><title>" << dateTime << "</title></head><body></body></html>";
+        file.close();
+        m_statusBar->showMessage("Entry created: " + fileName);
+        // Load the new file
+        m_currentFilePath = fullPath;
+        m_editor->textEdit()->setHtml("<html><head><title>" + dateTime + "</title></head><body></body></html>");
+        m_editor->textEdit()->document()->setModified(false);
+    } else {
+        QMessageBox::warning(this, "Error", "Could not create entry.");
+    }
+}
+
+void ShoinFrame::onTreeDoubleClicked(const QModelIndex &index) {
+    saveCurrentIfModified();
+    QString filePath = m_fileModel->filePath(index);
+    if (QFileInfo(filePath).isFile()) {
+        QFile file(filePath);
+        if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QString html = QString::fromUtf8(file.readAll());
+            m_editor->textEdit()->setHtml(html);
+            m_editor->textEdit()->document()->setModified(false);
+            m_currentFilePath = filePath;
+            m_statusBar->showMessage("File opened: " + filePath);
+        }
+    }
+}
+
+void ShoinFrame::onTreeSelectionChanged(const QItemSelection &selected, const QItemSelection &deselected) {
+    saveCurrentIfModified();
+    if (selected.indexes().isEmpty()) {
+        m_titleEdit->clear();
+        m_titleEdit->setEnabled(false);
+        return;
+    }
+    QModelIndex index = selected.indexes().first();
+    QString filePath = m_fileModel->filePath(index);
+    if (QFileInfo(filePath).isFile()) {
+        QFile file(filePath);
+        if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QString html = QString::fromUtf8(file.readAll());
+            m_editor->textEdit()->setHtml(html);
+            m_editor->textEdit()->document()->setModified(false);
+            m_currentFilePath = filePath;
+            QString fileName = QFileInfo(filePath).baseName();
+            m_titleEdit->setText(fileName);
+            m_titleEdit->setEnabled(true);
+            m_statusBar->showMessage("File selected: " + filePath);
+        }
+    } else {
+        // Folder selected, clear editor or show blank
+        m_editor->textEdit()->clear();
+        m_currentFilePath.clear();
+        m_titleEdit->clear();
+        m_titleEdit->setEnabled(false);
+        m_statusBar->showMessage("Folder selected");
+    }
+}
+
+void ShoinFrame::onTreeContextMenu(const QPoint &pos) {
+    QModelIndex index = m_treeView->indexAt(pos);
+    if (!index.isValid()) return;
+
+    QMenu menu(this);
+    menu.addAction(m_newFolderAction);
+    menu.addAction(m_newEntryAction);
+    menu.addSeparator();
+    QAction *renameAction = menu.addAction("Rename");
+    connect(renameAction, &QAction::triggered, [this, index]() {
+        m_treeView->edit(index);
+    });
+    QAction *deleteAction = menu.addAction("Delete");
+    connect(deleteAction, &QAction::triggered, [this, index]() {
+        QString filePath = m_fileModel->filePath(index);
+        QFileInfo info(filePath);
+        if (info.isDir()) {
+            QDir dir(filePath);
+            if (dir.removeRecursively()) {
+                m_statusBar->showMessage("Folder deleted: " + filePath);
+            } else {
+                QMessageBox::warning(this, "Error", "Could not delete folder.");
+            }
+        } else {
+            if (QFile::remove(filePath)) {
+                m_statusBar->showMessage("File deleted: " + filePath);
+            } else {
+                QMessageBox::warning(this, "Error", "Could not delete file.");
+            }
+        }
+    });
+    menu.exec(m_treeView->mapToGlobal(pos));
+}
+
+void ShoinFrame::onTreeClicked(const QModelIndex &index) {
+    if (m_fileModel->isDir(index)) m_treeView->setExpanded(index, !m_treeView->isExpanded(index));
+}
+
+void ShoinFrame::onLeatherTheme() {
+    setStyleSheet("QWidget { background-color: #3C2F2F; }");
+    m_titleBar->setStyleSheet("background-color: #3C2F2F;");
+    m_menuBar->setStyleSheet("QMenuBar { background-color: #3C2F2F; color: #D4AF37; }"
+                             "QMenuBar::item { background-color: transparent; color: #D4AF37; }"
+                             "QMenuBar::item:selected { background-color: #5C4A3F; color: #F5E8C7; }"
+                             "QMenu { background-color: #3C2F2F; color: #D4AF37; border: 1px solid #5C4A3F; }"
+                             "QMenu::item { background-color: transparent; color: #D4AF37; }"
+                             "QMenu::item:selected { background-color: #5C4A3F; color: #F5E8C7; }");
+    m_toolBar->setStyleSheet("QToolBar {"
+                             "  background-color: #6F5A4A;"
+                             "  border-left: 8px solid #3C2F2F;"
+                             "  border-right: 8px solid #3C2F2F;"
+                             "  border-top: 0;"
+                             "  border-bottom: 0;"
+                             "  padding: 4px 0;"
+                             "}"
+                             "QToolButton { background-color: transparent; border: none; padding: 2px; }"
+                             "QToolButton:hover { background-color: #8B7355; border-radius: 2px; }"
+                             "QToolButton:pressed { background-color: #5C4A3F; }"
+                             "QComboBox { background-color: #5C4A3F; color: #F5E8C7; border: 1px solid #8B7355; border-radius: 2px; padding: 2px; min-width: 60px; }"
+                             "QComboBox:hover { background-color: #8B7355; }"
+                             "QComboBox::drop-down { border: none; background-color: #5C4A3F; }"
+                             "QComboBox::down-arrow { image: none; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 4px solid #F5E8C7; margin-right: 4px; }"
+                             "QComboBox QAbstractItemView { background-color: #3C2F2F; color: #F5E8C7; border: 1px solid #5C4A3F; selection-background-color: #8B7355; }");
+    m_statusBar->setStyleSheet("background-color: #3C2F2F; color: #D4AF37;");
+    m_treeView->setStyleSheet(R"(
+       QTreeView, QTreeView::item, QTreeView::branch {
+         color: #f5e8c7;
+         background-color: #3C2F2F;
+         selection-background-color: #8c5c2a;
+         selection-color: #f5e8c7;
+       }
+       QTreeView::item:selected, QTreeView::branch:selected {
+         background-color: #8c5c2a;
+         color: #f5e8c7;
+       }
+     )");
+    m_titleEdit->setStyleSheet(R"(
+       QLineEdit {
+         color: #f5e8c7 !important;
+         background-color: #3f2a1e;
+         selection-background-color: #8c5c2a;
+         selection-color: #f5e8c7;
+       }
+     )");
+    qApp->setStyleSheet("QMenu { background-color: #3C2F2F; color: #f5e8c7; }"
+                        "QInputDialog, QDialog { background-color: #3C2F2F; color: #f5e8c7; }"
+                        "QInputDialog QLabel, QDialog QLabel, QMessageBox QLabel { color: #f5e8c7; }"
+                        "QInputDialog QLineEdit, QDialog QLineEdit, QTreeView QLineEdit { color: #f5e8c7 !important; background-color: #3f2a1e; selection-background-color: #8c5c2a; selection-color: #f5e8c7; }"
+                        "QInputDialog QPushButton, QDialog QPushButton { background-color: #6F5A4A; color: #f5e8c7; }"
+                        "QMessageBox { background-color: #3C2F2F; color: #f5e8c7; }"
+                        "QMessageBox QPushButton { background-color: #6F5A4A; color: #f5e8c7; border: 1px solid #3C2F2F; padding: 5px; }"
+                        "QFileDialog { background-color: #3C2F2F; color: #f5e8c7; }"
+                        "QFileDialog QListView { background-color: #3f2a1e; color: #f5e8c7; }"
+                        "QFileDialog QTreeView { background-color: #3f2a1e; color: #f5e8c7; }");
+}
+
+void ShoinFrame::onClassicBlueTheme() {
+    setStyleSheet("QWidget { background-color: #1e3a5f; }");
+    m_titleBar->setStyleSheet("background-color: #1e3a5f;");
+    m_menuBar->setStyleSheet("QMenuBar { background-color: #1e3a5f; color: #ffffff; }"
+                             "QMenuBar::item { background-color: transparent; color: #ffffff; }"
+                             "QMenuBar::item:selected { background-color: #2e4a6f; color: #ffffff; }"
+                             "QMenu { background-color: #1e3a5f; color: #ffffff; border: 1px solid #2e4a6f; }"
+                             "QMenu::item { background-color: transparent; color: #ffffff; }"
+                             "QMenu::item:selected { background-color: #2e4a6f; color: #ffffff; }");
+    m_toolBar->setStyleSheet("QToolBar {"
+                             "  background-color: #2e4a6f;"
+                             "  border-left: 8px solid #1e3a5f;"
+                             "  border-right: 8px solid #1e3a5f;"
+                             "  border-top: 0;"
+                             "  border-bottom: 0;"
+                             "  padding: 4px 0;"
+                             "}"
+                             "QToolButton { background-color: transparent; border: none; padding: 2px; }"
+                             "QToolButton:hover { background-color: #3e5a7f; border-radius: 2px; }"
+                             "QToolButton:pressed { background-color: #0e2a4f; }"
+                             "QComboBox { background-color: #0e2a4f; color: #ffffff; border: 1px solid #3e5a7f; border-radius: 2px; padding: 2px; min-width: 60px; }"
+                             "QComboBox:hover { background-color: #3e5a7f; }"
+                             "QComboBox::drop-down { border: none; background-color: #0e2a4f; }"
+                             "QComboBox::down-arrow { image: none; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 4px solid #ffffff; margin-right: 4px; }"
+                             "QComboBox QAbstractItemView { background-color: #1e3a5f; color: #ffffff; border: 1px solid #2e4a6f; selection-background-color: #3e5a7f; }");
+    m_statusBar->setStyleSheet("background-color: #1e3a5f; color: #ffffff;");
+    m_treeView->setStyleSheet(R"(
+       QTreeView, QTreeView::item, QTreeView::branch {
+         color: #ffffff !important;
+         background-color: #1e3a5f;
+         selection-background-color: #2e4a6f;
+         selection-color: #ffffff;
+       }
+       QTreeView::item:selected, QTreeView::branch:selected {
+         background-color: #2e4a6f;
+         color: #ffffff;
+       }
+       QTreeView QLineEdit {
+         color: #ffffff !important;
+         background-color: #2e4a6f;
+         selection-background-color: #3e5a7f;
+         selection-color: #ffffff;
+       }
+     )");
+    m_titleEdit->setStyleSheet("");
+    qApp->setStyleSheet("QMenu { background-color: #1e3a5f; color: #ffffff; }"
+                        "QInputDialog, QDialog { background-color: #1e3a5f; color: #ffffff; }"
+                        "QInputDialog QLabel, QDialog QLabel, QMessageBox QLabel { color: #ffffff; }"
+                        "QInputDialog QLineEdit, QDialog QLineEdit, QTreeView QLineEdit { color: #ffffff !important; background-color: #2e4a6f; selection-background-color: #3e5a7f; selection-color: #ffffff; }"
+                        "QInputDialog QPushButton, QDialog QPushButton { background-color: #2e4a6f; color: #ffffff; }"
+                        "QMessageBox { background-color: #1e3a5f; color: #ffffff; }"
+                        "QMessageBox QPushButton { background-color: #2e4a6f; color: #ffffff; border: 1px solid #1e3a5f; padding: 5px; }"
+                        "QFileDialog { background-color: #1e3a5f; color: #ffffff; }"
+                        "QFileDialog QListView { background-color: #ffffff; color: #1e3a5f; }"
+                        "QFileDialog QTreeView { background-color: #ffffff; color: #1e3a5f; }");
+}
+
+QIcon ShoinFrame::createToolbarIcon(const QString &symbol) {
     QPixmap pix(16, 16);
     pix.fill(Qt::transparent);
     QPainter p(&pix);

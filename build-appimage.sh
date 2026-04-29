@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "=== Monastery AppImage Builder ==="
+echo "=== Shoin AppImage Builder ==="
 echo "Starting build process..."
 
 echo "Running rebuild.sh to get latest binary..."
@@ -21,28 +21,25 @@ echo "Making deployment tools executable..."
 chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage
 
 # Install Hunspell if not present (one-time)
-echo "Ensuring Hunspell is installed..."
-sudo apt-get update -qq
-sudo apt-get install -y --no-install-recommends libhunspell-dev hunspell-en-us
+if ! dpkg -s libhunspell-dev >/dev/null 2>&1 || ! dpkg -s hunspell-en-us >/dev/null 2>&1; then
+    echo "Installing Hunspell..."
+    sudo apt-get update -qq
+    sudo apt-get install -y --no-install-recommends libhunspell-dev hunspell-en-us
+else
+    echo "Hunspell already installed."
+fi
 
 echo "Cleaning up previous AppDir..."
 rm -rf AppDir
 
-# Prepare icon
-echo "Preparing icon (forcing exact 512x512 square)..."
-if command -v convert >/dev/null 2>&1; then
-    convert monastery.png -resize 512x512^ -gravity center -extent 512x512 -background none monastery.png
-    echo "Icon resized to perfect 512x512 square."
-else
-    echo "WARNING: ImageMagick not found. Install with: sudo apt install imagemagick"
-fi
+mkdir -p AppDir/usr/share/icons/hicolor/512x512/apps
+cp shoin.png AppDir/usr/share/icons/hicolor/512x512/apps/shoin.png 2>/dev/null || true
 
 echo "Bundling Qt application + Hunspell into AppImage..."
 ./linuxdeploy-x86_64.AppImage --appdir AppDir \
     --plugin qt \
-    --executable build/Monastery \
-    --icon-file monastery.png \
-    --desktop-file Monastery.desktop \
+    --executable build/Shoin \
+    --desktop-file Shoin.desktop \
     --library /usr/lib/x86_64-linux-gnu/libhunspell-1.7.so.0 \
     --output appimage
 
@@ -51,9 +48,9 @@ mkdir -p AppDir/usr/share/hunspell
 cp /usr/share/hunspell/en_US.aff AppDir/usr/share/hunspell/ 2>/dev/null || true
 cp /usr/share/hunspell/en_US.dic AppDir/usr/share/hunspell/ 2>/dev/null || true
 
-echo "Renaming to Monastery.AppImage..."
-mv Monastery-x86_64.AppImage Monastery.AppImage 2>/dev/null || true
+echo "Renaming to Shoin.AppImage..."
+mv Shoin-x86_64.AppImage Shoin.AppImage 2>/dev/null || true
 
-echo "✅ Success! Monastery.AppImage is ready with Hunspell spell checking."
-ls -lh Monastery.AppImage
+echo "✅ Success! Shoin.AppImage is ready with Hunspell spell checking."
+ls -lh Shoin.AppImage
 echo "Copy this to your Dropbox folder."

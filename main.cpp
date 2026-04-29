@@ -1,14 +1,14 @@
 #include <QApplication>
 #include <QDir>
-#include "MonasteryFrame.h"
+#include "ShoinFrame.h"
 
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
-    app.setApplicationName("Monastery");
+    app.setApplicationName("Shoin");
     app.setApplicationVersion("1.0.0");
-    app.setOrganizationName("Monastery");
+    app.setOrganizationName("Shoin");
 
-    MonasteryFrame frame;
+    ShoinFrame frame;
     frame.show();
 
     return app.exec();
