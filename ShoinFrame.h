@@ -10,6 +10,15 @@
 #include <QTreeView>
 #include <QFileSystemModel>
 #include <QFileIconProvider>
+#include <QMenuBar>
+#include <QToolBar>
+#include <QStatusBar>
+#include <QAction>
+#include <QActionGroup>
+#include <QLineEdit>
+#include <QPushButton>
+#include <QItemSelection>
+#include "Theme.h"
 
 extern const char *folder_xpm[];
 
@@ -22,6 +31,11 @@ public:
 };
 
 class MonasteryEditor;
+class QPlainTextEdit;
+class QStackedWidget;
+class QFontComboBox;
+class QComboBox;
+class QTemporaryFile;
 
 class ShoinFrame : public QWidget {
     Q_OBJECT
@@ -30,6 +44,7 @@ public:
     ShoinFrame(QWidget *parent = nullptr);
     ~ShoinFrame();
     static QString getRealAppDir();
+    bool openPath(const QString &path);
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -55,8 +70,10 @@ private slots:
     void onJustify();
     void onBulletList();
     void onNumberedList();
+    void onChecklist();
     void onFontChanged(const QString &font);
     void onSizeChanged(const QString &size);
+    void onSelectionFontChanged(const QString &family, int pt);
     void onPrint();
     void onInsertPageBreak();
     void updateWordCount();
@@ -66,8 +83,8 @@ private slots:
     void onTreeSelectionChanged(const QItemSelection &selected, const QItemSelection &deselected);
     void onTreeContextMenu(const QPoint &pos);
     void onTreeClicked(const QModelIndex &index);
-    void onLeatherTheme();
-    void onClassicBlueTheme();
+    void updateTitleBar();
+    void applyTheme(ThemeId id);
 
 private:
     void createActions();
@@ -75,16 +92,73 @@ private:
     void createToolBar();
     void createStatusBar();
     void createDocsFolder();
-    void saveCurrentIfModified();
     QIcon createToolbarIcon(const QString &symbol);
+    void colorizeToolbarIcons(const Theme &theme);
+    void applyUiFont(const Theme &theme);
 
-    MonasteryEditor *m_editor;
-    QTimer *m_autoSaveTimer;
+    bool confirmProceedIfDirty();
+    bool hasNamedDocument() const;
+    QString documentDisplayName() const;
+    QString autosaveSidecarPath() const;
+    bool htmlLooksEmpty(const QString &html) const;
+    bool wouldClobberManuscript(const QString &incoming) const;
+    bool writeHtmlFile(const QString &path, const QString &html);
+    bool persistDocument(const QString &path, const QString &html, bool markCleanAfter);
+    bool ensureSavePath();
+    bool saveNow();
+    bool saveMarkdownNow();
+    QString waitForEditorHtml();
+    bool openHtmlFile(const QString &filePath);
+    bool loadHtmlDocument(const QString &path);
+    bool loadMarkdownDocument(const QString &path);
+    bool isMarkdownSourcePath(const QString &path) const;
+    bool isMarkdownMode() const;
+    void setMarkdownMode(bool on);
+    void setFormatActionsEnabled(bool on);
+    void emitListenHealth(const QString &openedPath);
+    void dumpListenSelectionFont();
+    void requestListenQuit();
+    void onPdfPrintingFinished(const QString &path, bool success);
+    bool maybeStartListenPrint();
+    void onLedgerCheckRequested(const QString &id);
+    bool documentIsDirty() const;
+    void restoreTreeSelection();
+    QString themeMenuName(const Theme &th) const;
+
+    MonasteryEditor *m_editor = nullptr;
+    QStackedWidget *m_editorStack = nullptr;
+    QPlainTextEdit *m_mdEdit = nullptr;
+    QTimer *m_autoSaveTimer = nullptr;
+    QTimer *m_wordCountPollTimer = nullptr;
     QString m_docsDir;
     QString m_currentFilePath;
     QRect m_normalGeometry;
+    bool m_suppressTreeLoad = false;
+    bool m_didOfferRestore = false;
+    bool m_markdownMode = false;
+    bool m_listenQuitArmed = false;
+    bool m_listenPrintPending = false;
+    QTemporaryFile *m_printTemp = nullptr;
+    QString m_pendingLpPdf;
+    QString m_pendingLpPrinter;
+    int m_pendingLpCopies = 1;
 
-    // Resize handling
+    QWidget *m_titleBar = nullptr;
+    QLabel *m_titleLabel = nullptr;
+    QPushButton *m_minBtn = nullptr;
+    QPushButton *m_maxBtn = nullptr;
+    QPushButton *m_closeBtn = nullptr;
+    QMenuBar *m_menuBar = nullptr;
+    QToolBar *m_toolBar = nullptr;
+    QFontComboBox *m_fontCombo = nullptr;
+    QComboBox *m_sizeCombo = nullptr;
+    QStatusBar *m_statusBar = nullptr;
+    QActionGroup *m_themeGroup = nullptr;
+    Theme m_currentTheme;
+
+    QPoint m_dragPosition;
+    bool m_dragging = false;
+
     bool m_resizing;
     QPoint m_resizeStartPos;
     QPoint m_resizeStartMousePos;
@@ -92,38 +166,37 @@ private:
     enum ResizeDirection { None, Left, Right, Top, Bottom, TopLeft, TopRight, BottomLeft, BottomRight };
     ResizeDirection m_resizeDirection;
 
-    // Actions
-    QAction *m_saveAction;
-    QAction *m_saveAsAction;
-    QAction *m_printAction;
-    QAction *m_exitAction;
-    QAction *m_boldAction;
-    QAction *m_italicAction;
-    QAction *m_underlineAction;
-    QAction *m_strikethroughAction;
-    QAction *m_alignLeftAction;
-    QAction *m_alignCenterAction;
-    QAction *m_alignRightAction;
-    QAction *m_justifyAction;
-    QAction *m_bulletAction;
-    QAction *m_numberAction;
-    QAction *m_pageBreakAction;
-    QAction *m_undoAction;
-    QAction *m_redoAction;
-    QAction *m_cutAction;
-    QAction *m_copyAction;
-    QAction *m_pasteAction;
-    QLabel *m_wordCountLabel;
-    QLineEdit *m_titleEdit;
+    QAction *m_newAction = nullptr;
+    QAction *m_openAction = nullptr;
+    QAction *m_saveAction = nullptr;
+    QAction *m_saveAsAction = nullptr;
+    QAction *m_printAction = nullptr;
+    QAction *m_exitAction = nullptr;
+    QAction *m_boldAction = nullptr;
+    QAction *m_italicAction = nullptr;
+    QAction *m_underlineAction = nullptr;
+    QAction *m_strikethroughAction = nullptr;
+    QAction *m_alignLeftAction = nullptr;
+    QAction *m_alignCenterAction = nullptr;
+    QAction *m_alignRightAction = nullptr;
+    QAction *m_justifyAction = nullptr;
+    QAction *m_bulletAction = nullptr;
+    QAction *m_numberAction = nullptr;
+    QAction *m_checklistAction = nullptr;
+    QAction *m_pageBreakAction = nullptr;
+    QAction *m_undoAction = nullptr;
+    QAction *m_redoAction = nullptr;
+    QAction *m_cutAction = nullptr;
+    QAction *m_copyAction = nullptr;
+    QAction *m_pasteAction = nullptr;
+    QAction *m_newFolderAction = nullptr;
+    QAction *m_newEntryAction = nullptr;
+    QLabel *m_wordCountLabel = nullptr;
+    QLineEdit *m_titleEdit = nullptr;
 
-    // Library pane
-    QSplitter *m_splitter;
-    QTreeView *m_treeView;
-    QFileSystemModel *m_fileModel;
-
-    // Themes
-    QAction *m_leatherThemeAction;
-    QAction *m_classicBlueThemeAction;
+    QSplitter *m_splitter = nullptr;
+    QTreeView *m_treeView = nullptr;
+    QFileSystemModel *m_fileModel = nullptr;
 };
 
 #endif // SHOINFRAME_H

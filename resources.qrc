@@ -15,5 +15,6 @@
         <file>icons/shoin.png</file>
         <file>icons/strikethru.png</file>
         <file>icons/checklist.png</file>
+        <file>editor.html</file>
     </qresource>
 </RCC>
