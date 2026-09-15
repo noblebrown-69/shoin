@@ -2,6 +2,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QFile>
 #include <QTimer>
 #include <cstdio>
 #include "DocumentIo.h"
@@ -58,10 +59,44 @@ static QString firstLeftoverExistingFile(const QStringList &args)
     return QString();
 }
 
+
+static void ensureSpellcheckDictionariesPath(int argc, char *argv[])
+{
+    if (!qEnvironmentVariableIsEmpty("QTWEBENGINE_DICTIONARIES_PATH"))
+        return;
+
+    const QByteArray appdir = qgetenv("APPDIR");
+    if (!appdir.isEmpty()) {
+        const QString p = QString::fromLocal8Bit(appdir)
+            + QStringLiteral("/usr/share/qtwebengine_dictionaries");
+        if (QDir(p).exists()) {
+            qputenv("QTWEBENGINE_DICTIONARIES_PATH", QFile::encodeName(p));
+            return;
+        }
+    }
+
+    const QString homeLocal = QDir::homePath()
+        + QStringLiteral("/.local/share/qtwebengine_dictionaries");
+    if (QFileInfo::exists(homeLocal + QStringLiteral("/en-US.bdic"))) {
+        qputenv("QTWEBENGINE_DICTIONARIES_PATH", QFile::encodeName(homeLocal));
+        return;
+    }
+
+    if (argc > 0) {
+        const QString beside = QFileInfo(QString::fromLocal8Bit(argv[0])).absolutePath()
+            + QStringLiteral("/qtwebengine_dictionaries");
+        if (QFileInfo::exists(beside + QStringLiteral("/en-US.bdic"))) {
+            qputenv("QTWEBENGINE_DICTIONARIES_PATH", QFile::encodeName(beside));
+            return;
+        }
+    }
+}
+
 int main(int argc, char *argv[]) {
+    ensureSpellcheckDictionariesPath(argc, argv);
     QApplication app(argc, argv);
     app.setApplicationName("Shoin");
-    app.setApplicationVersion("2.0.1");
+    app.setApplicationVersion("2.0.2");
     app.setOrganizationName("Shoin");
 
     const QStringList args = app.arguments();
