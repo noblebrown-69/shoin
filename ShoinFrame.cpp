@@ -712,22 +712,60 @@ ShoinFrame::ShoinFrame(QWidget *parent) : QWidget(parent) {
     m_titleEdit->setPlaceholderText("Select a file to rename");
     m_titleEdit->setEnabled(false);
     connect(m_titleEdit, &QLineEdit::returnPressed, this, [this]() {
-        if (m_currentFilePath.isEmpty()) return;
-        QString newName = m_titleEdit->text().trimmed();
-        if (newName.isEmpty()) return;
+        if (m_currentFilePath.isEmpty())
+            return;
+        const QString typed = m_titleEdit->text().trimmed();
+        if (typed.isEmpty())
+            return;
+
         QString suffix = QFileInfo(m_currentFilePath).suffix();
         if (suffix.isEmpty())
             suffix = QStringLiteral("html");
-        newName += "." + suffix;
-        QFileInfo oldInfo(m_currentFilePath);
-        QString newPath = oldInfo.absoluteDir().absoluteFilePath(newName);
-        if (QFile::rename(m_currentFilePath, newPath)) {
-            m_currentFilePath = newPath;
-            updateTitleBar();
-            m_statusBar->showMessage("File renamed to: " + newName);
-        } else {
-            QMessageBox::warning(this, "Error", "Could not rename file.");
+
+        // Title edit shows basename without extension; keep that contract.
+        QString base = typed;
+        if (base.endsWith(QLatin1Char('.') + suffix, Qt::CaseInsensitive))
+            base.chop(suffix.size() + 1);
+
+        const QFileInfo oldInfo(m_currentFilePath);
+        const QString newPath = oldInfo.absoluteDir().absoluteFilePath(base + QLatin1Char('.') + suffix);
+
+        // Same path: no-op (avoid rename + FS model churn while still in returnPressed).
+        if (QFileInfo(newPath).absoluteFilePath() == oldInfo.absoluteFilePath())
+            return;
+
+        if (QFile::exists(newPath)) {
+            QMessageBox::warning(this, QStringLiteral("Rename"),
+                                 QStringLiteral("A file named \"%1\" already exists.")
+                                     .arg(QFileInfo(newPath).fileName()));
+            return;
         }
+
+        // Suppress tree selection handler for the whole rename window. QFileSystemModel
+        // often emits an empty selection mid-rename; clearing/disabling m_titleEdit
+        // while still inside returnPressed re-enters Qt Widgets paint/layout → SEGV.
+        m_suppressTreeLoad = true;
+        if (!QFile::rename(m_currentFilePath, newPath)) {
+            m_suppressTreeLoad = false;
+            QMessageBox::warning(this, QStringLiteral("Rename"),
+                                 QStringLiteral("Could not rename file."));
+            return;
+        }
+
+        m_currentFilePath = newPath;
+        m_titleEdit->setText(QFileInfo(newPath).completeBaseName());
+        updateTitleBar();
+        m_statusBar->showMessage(QStringLiteral("File renamed to: %1")
+                                     .arg(QFileInfo(newPath).fileName()));
+        m_titleEdit->clearFocus();
+
+        // Defer tree reselection until after the key event finishes.
+        // restoreTreeSelection flips suppress internally; clear once afterward
+        // so nested suppress cannot stick true.
+        QTimer::singleShot(0, this, [this]() {
+            restoreTreeSelection();
+            m_suppressTreeLoad = false;
+        });
     });
     editorLayout->addWidget(m_titleEdit);
 
