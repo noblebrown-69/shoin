@@ -28,6 +28,7 @@
 #include <QPageSize>
 #include <QMarginsF>
 #include <QProcess>
+#include <QSet>
 #include <QDebug>
 #include <QTemporaryFile>
 #include <QMouseEvent>
@@ -2254,9 +2255,15 @@ bool ShoinFrame::saveMarkdownNow()
 void ShoinFrame::onLedgerCheckRequested(const QString &id)
 {
     static const QRegularExpression idRe(QStringLiteral("^[A-Za-z0-9_-]+$"));
+    static QSet<QString> stampedThisSession;
     const QString cleanId = id.trimmed();
     if (cleanId.isEmpty() || !idRe.match(cleanId).hasMatch()) {
         qWarning("ledger check: rejected id");
+        return;
+    }
+    if (stampedThisSession.contains(cleanId)) {
+        if (m_statusBar)
+            m_statusBar->showMessage(QStringLiteral("Done: %1 (already stamped)").arg(cleanId), 2000);
         return;
     }
 
@@ -2268,6 +2275,7 @@ void ShoinFrame::onLedgerCheckRequested(const QString &id)
     if (!m.hasMatch()) {
         qWarning("ledger check: current file is not a dated Daily.html (%s)",
                  qPrintable(name));
+        // Quiet: non-Daily ticks (WEEKEND etc.) — no statusBar spam
         return;
     }
     const QString date = m.captured(1);
@@ -2288,14 +2296,29 @@ void ShoinFrame::onLedgerCheckRequested(const QString &id)
         if (status != QProcess::NormalExit || code != 0) {
             qWarning("ledger check failed for %s (exit %d): %s",
                      qPrintable(cleanId), code, err.constData());
-        } else if (m_statusBar) {
-            m_statusBar->showMessage(QStringLiteral("Ledger: stamped %1").arg(cleanId), 4000);
+            if (m_statusBar) {
+                const QString detail = QString::fromUtf8(err).trimmed();
+                m_statusBar->showMessage(
+                    QStringLiteral("Ledger fail %1%2")
+                        .arg(cleanId)
+                        .arg(detail.isEmpty() ? QString() : QStringLiteral(": ") + detail.left(80)),
+                    5000);
+            }
+        } else {
+            stampedThisSession.insert(cleanId);
+            if (m_statusBar)
+                m_statusBar->showMessage(QStringLiteral("Done: %1").arg(cleanId), 2500);
         }
         proc->deleteLater();
     });
-    QObject::connect(proc, &QProcess::errorOccurred, this, [proc, cleanId](QProcess::ProcessError) {
+    QObject::connect(proc, &QProcess::errorOccurred, this, [this, proc, cleanId](QProcess::ProcessError) {
         qWarning("ledger check process error for %s: %s",
                  qPrintable(cleanId), qPrintable(proc->errorString()));
+        if (m_statusBar) {
+            m_statusBar->showMessage(
+                QStringLiteral("Ledger fail %1: %2").arg(cleanId, proc->errorString()),
+                5000);
+        }
         proc->deleteLater();
     });
     proc->start(QStringLiteral("python3"), args);

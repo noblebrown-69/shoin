@@ -121,6 +121,29 @@ function syncTaskState(box) {
   }
 }
 
+/** One tick = every checkbox with the same data-ledger-id matches. */
+function syncSameLedgerId(source) {
+  if (!source || window._syncingLedger) return;
+  const lid = source.getAttribute('data-ledger-id');
+  if (!lid) return;
+  window._syncingLedger = true;
+  try {
+    const checked = !!source.checked;
+    document.querySelectorAll('#editor li.task input[type=checkbox][data-ledger-id]').forEach(function(box) {
+      if (box === source) return;
+      if (box.getAttribute('data-ledger-id') !== lid) return;
+      if (box.checked === checked) {
+        syncTaskState(box);
+        return;
+      }
+      box.checked = checked;
+      syncTaskState(box);
+    });
+  } finally {
+    window._syncingLedger = false;
+  }
+}
+
 function setContent(html) {
   window._loading = true;
   document.getElementById('editor').innerHTML = html || '<p></p>';
@@ -357,12 +380,15 @@ function sanitizePasted(root) {
         continue;
       }
       const checked = node.checked || node.hasAttribute('checked');
+      const ledgerId = node.getAttribute('data-ledger-id');
       while (node.attributes.length)
         node.removeAttribute(node.attributes[0].name);
       node.setAttribute('type', 'checkbox');
       node.setAttribute('contenteditable', 'false');
       if (checked)
         node.setAttribute('checked', '');
+      if (ledgerId)
+        node.setAttribute('data-ledger-id', ledgerId);
       continue;
     }
     const keepChecklist = node.tagName === 'UL' && node.classList.contains('checklist');
@@ -398,14 +424,19 @@ function sanitizePasted(root) {
   ed.addEventListener('click', function(e) {
     if (!e.target || !e.target.matches || !e.target.matches('input[type=checkbox]'))
       return;
+    if (window._syncingLedger) return;
     syncTaskState(e.target);
+    // visual siblings now; ledger fires on change only (once)
+    syncSameLedgerId(e.target);
     if (!window._loading) window.monasteryDirty = true;
   });
   ed.addEventListener('change', function(e) {
     if (!e.target || !e.target.matches || !e.target.matches('input[type=checkbox]'))
       return;
+    if (window._syncingLedger) return; // sibling sync — do not re-fire ledger
     const box = e.target;
     syncTaskState(box);
+    syncSameLedgerId(box);
     if (!window._loading) window.monasteryDirty = true;
     if (box.checked) {
       const lid = box.getAttribute('data-ledger-id');
