@@ -38,6 +38,7 @@ struct Block {
     Type type = Paragraph;
     QVector<InlineRun> runs;
     QVector<TableRow> rows;
+    QString ledgerId;
 };
 
 struct StyleInfo {
@@ -409,17 +410,22 @@ void tidyRuns(QVector<InlineRun> &runs)
 }
 
 void flushBlock(QVector<Block> &blocks, QVector<InlineRun> &runs, QString &buf,
-                const InlineState &st, Block::Type type)
+                const InlineState &st, Block::Type type, QString &ledgerId)
 {
     flushRun(runs, buf, st);
     tidyRuns(runs);
-    if (runs.isEmpty() && type != Block::CheckOpen && type != Block::CheckDone)
+    if (runs.isEmpty() && type != Block::CheckOpen && type != Block::CheckDone) {
+        ledgerId.clear();
         return;
+    }
     Block b;
     b.type = type;
     b.runs = runs;
+    if (type == Block::CheckOpen || type == Block::CheckDone)
+        b.ledgerId = ledgerId;
     blocks.append(b);
     runs.clear();
+    ledgerId.clear();
 }
 
 QVector<InlineRun> parseInlineFragment(const QString &html)
@@ -579,6 +585,7 @@ QVector<Block> parseHtmlBlocks(QString html)
     InlineState st;
     QVector<InlineState> stack;
     Block::Type type = Block::Paragraph;
+    QString pendingLedgerId;
     bool inChecklist = false;
     bool skip = false;
     int i = 0;
@@ -615,7 +622,7 @@ QVector<Block> parseHtmlBlocks(QString html)
 
         if (name == QLatin1String("table")) {
             if (!closing) {
-                flushBlock(blocks, runs, buf, st, type);
+                flushBlock(blocks, runs, buf, st, type, pendingLedgerId);
                 type = Block::Paragraph;
                 const int end = findCloseTag(html, i, QStringLiteral("</table>"));
                 const QString inner = (end < 0) ? html.mid(i) : html.mid(i, end - i);
@@ -635,6 +642,9 @@ QVector<Block> parseHtmlBlocks(QString html)
             if (itype == QLatin1String("checkbox") || itype.isEmpty()) {
                 if (hasBareAttr(raw, QStringLiteral("checked")))
                     type = Block::CheckDone;
+                const QString lid = attrValue(raw, QStringLiteral("data-ledger-id"));
+                if (!lid.isEmpty())
+                    pendingLedgerId = lid;
             }
             continue;
         }
@@ -670,7 +680,7 @@ QVector<Block> parseHtmlBlocks(QString html)
                 const QString cls = attrValue(raw, QStringLiteral("class")).toLower();
                 inChecklist = cls.contains(QLatin1String("checklist"));
             } else {
-                flushBlock(blocks, runs, buf, st, type);
+                flushBlock(blocks, runs, buf, st, type, pendingLedgerId);
                 inChecklist = false;
                 type = Block::Paragraph;
             }
@@ -678,10 +688,10 @@ QVector<Block> parseHtmlBlocks(QString html)
         }
         if (name == QLatin1String("li")) {
             if (closing) {
-                flushBlock(blocks, runs, buf, st, type);
+                flushBlock(blocks, runs, buf, st, type, pendingLedgerId);
                 type = Block::Paragraph;
             } else {
-                flushBlock(blocks, runs, buf, st, type);
+                flushBlock(blocks, runs, buf, st, type, pendingLedgerId);
                 const QString cls = attrValue(raw, QStringLiteral("class")).toLower();
                 if (inChecklist || cls.contains(QLatin1String("task"))) {
                     type = cls.contains(QLatin1String("done")) ? Block::CheckDone : Block::CheckOpen;
@@ -695,10 +705,10 @@ QVector<Block> parseHtmlBlocks(QString html)
             || name == QLatin1String("p") || name == QLatin1String("div")
             || name == QLatin1String("h4") || name == QLatin1String("h5") || name == QLatin1String("h6")) {
             if (closing) {
-                flushBlock(blocks, runs, buf, st, type);
+                flushBlock(blocks, runs, buf, st, type, pendingLedgerId);
                 type = Block::Paragraph;
             } else {
-                flushBlock(blocks, runs, buf, st, type);
+                flushBlock(blocks, runs, buf, st, type, pendingLedgerId);
                 if (name == QLatin1String("h1"))
                     type = Block::H1;
                 else if (name == QLatin1String("h2"))
@@ -712,7 +722,7 @@ QVector<Block> parseHtmlBlocks(QString html)
         }
         Q_UNUSED(tagSelfClose(raw, name));
     }
-    flushBlock(blocks, runs, buf, st, type);
+    flushBlock(blocks, runs, buf, st, type, pendingLedgerId);
     return blocks;
 }
 
@@ -759,6 +769,11 @@ QString blocksToHtml(const QVector<Block> &blocks)
             out += QStringLiteral("\"><input type=\"checkbox\"");
             if (done)
                 out += QStringLiteral(" checked");
+            if (!b.ledgerId.isEmpty()) {
+                out += QStringLiteral(" data-ledger-id=\"");
+                out += htmlEscape(b.ledgerId).replace(QLatin1Char('"'), QStringLiteral("&quot;"));
+                out += QLatin1Char('"');
+            }
             out += QStringLiteral(" contenteditable=\"false\"><span>");
             out += inner;
             out += QStringLiteral("</span></li>");
