@@ -84,7 +84,7 @@ private slots:
     void onTreeContextMenu(const QPoint &pos);
     void onTreeClicked(const QModelIndex &index);
     void updateTitleBar();
-    void applyTheme(ThemeId id);
+    void applyTheme(ThemeId id, bool persist = true);
 
 private:
     void createActions();
@@ -154,6 +154,7 @@ private:
     QComboBox *m_sizeCombo = nullptr;
     QStatusBar *m_statusBar = nullptr;
     QActionGroup *m_themeGroup = nullptr;
+    QAction *m_followBushidosAction = nullptr;
     Theme m_currentTheme;
 
     QPoint m_dragPosition;
